@@ -7,21 +7,27 @@ from flask import Flask
 from threading import Thread
 
 # =====================================================================
-# 🛠️ 1. KEEPALIVE SERVER (CHỐNG SẬP/NGỦ ĐÔNG TRÊN RENDER FREE)
+# 🛠️ 1. KEEPALIVE SERVER (ĐÃ TỐI ƯU HÓA KHÔNG GÂY NGHẼN CHO DISCORD.PY)
 # =====================================================================
 app = Flask('')
 
+# Tắt log hiển thị của Flask trên bảng Console để đỡ rối mắt và nhẹ máy
+import logging
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+
 @app.route('/')
 def home():
-    return "Bot Deep Scan đang chạy ổn định 24/7 trên Render Free!"
+    return "OK", 200  # Trả về kết quả ngắn gọn nhất để giải phóng luồng ngay lập tức
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    # Chạy Flask ở chế độ đơn luồng tối giản nhất, không tải lại (threaded=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=port, threaded=False, use_reloader=False)
 
 def keep_alive():
     t = Thread(target=run_flask)
-    t.daemon = True
+    t.daemon = True  # Chạy ngầm hoàn toàn tách biệt với bot
     t.start()
 
 keep_alive()
