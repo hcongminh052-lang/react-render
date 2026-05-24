@@ -132,17 +132,19 @@ async def follow_old(ctx):
     if not auto_react_enabled: return
 
     is_cleaning = True
-    print(f"🧹 [SIÊU TỐI ƯU RAM] Bắt đầu quét cuốn chiếu {len(TARGET_CHANNELS)} kênh...")
+    print(f"🧹 [HỆ THỐNG] Bắt đầu quét cuốn chiếu và tối ưu chống Rate Limit...")
 
-    TARGET_PER_CHANNEL = 30   # Giảm xuống 30 tin chất lượng/kênh để giải phóng RAM nhanh hơn
-    MAX_LOOKBACK = 500        # Giới hạn lội ngược dòng 500 tin/kênh để an toàn
+    TARGET_PER_CHANNEL = 40   # Số tin nhắn cần lấy mỗi kênh
+    MAX_LOOKBACK = 600        # Giới hạn lội ngược dòng để an toàn RAM
+    
+    # Rổ lớn để gom tối đa tin nhắn của TẤT CẢ các kênh trước khi trộn tổng thể
+    global_temp_list = []
 
-    # Tạo một danh sách tạm để xáo trộn các kênh (giúp react rải đều các kênh thay vì tập trung 1 kênh)
+    # Đảo thứ tự quét các kênh để tăng tính ngẫu nhiên
     shuffled_channels = TARGET_CHANNELS.copy()
     random.shuffle(shuffled_channels)
 
     for cid in shuffled_channels:
-        # Nếu tổng số react chạy ngầm đã chạm đỉnh trong lúc quét thì dừng luôn
         if current_total_reacts >= TOTAL_REACT_LIMIT:
             break
 
@@ -152,12 +154,9 @@ async def follow_old(ctx):
         channel_gathered = 0
         total_scanned = 0
         oldest_msg_id = None
-        
-        # Danh sách gom tạm thời cho RIÊNG KÊNH NÀY để trộn nội bộ trước khi đẩy vào Queue chính
-        channel_msg_list = []
 
         while channel_gathered < TARGET_PER_CHANNEL and total_scanned < MAX_LOOKBACK:
-            args = {"limit": 50}  # Chia nhỏ lượt cào xuống 50 tin/lần thay vì 100 để Render không bị nghẹn
+            args = {"limit": 50}  # Chia nhỏ để Render Free không bị nghẹn
             if oldest_msg_id:
                 args["before"] = discord.Object(id=oldest_msg_id)
 
@@ -170,7 +169,7 @@ async def follow_old(ctx):
                 break
 
             if not history_chunk:
-                break  # Đã chạm đáy kênh
+                break
 
             oldest_msg_id = history_chunk[-1].id
             total_scanned += len(history_chunk)
@@ -181,26 +180,29 @@ async def follow_old(ctx):
                     missing_reactions = [r for r in msg.reactions if str(r.emoji) not in my_reactions]
                     
                     if missing_reactions:
-                        channel_msg_list.append(msg)
+                        global_temp_list.append(msg) # Đổ chung vào rổ lớn
                         channel_gathered += 1
                         if channel_gathered >= TARGET_PER_CHANNEL:
                             break
             
-            # Xóa chunk cũ ngay lập tức để Python giải phóng RAM
-            del history_chunk
+            del history_chunk # Dọn RAM ngay lập tức
 
-        # Trộn ngẫu nhiên các tin nhắn tìm được trong kênh này và đẩy thẳng vào hàng đợi
-        if channel_msg_list:
-            random.shuffle(channel_msg_list)
-            for msg in channel_msg_list:
-                await reaction_queue.put(msg)
-            
-            print(f"   -> Kênh {cid}: Đã nạp {len(channel_msg_list)} tin vào hàng đợi. Giải phóng bộ nhớ...")
-            # Xóa mảng tạm của kênh để RAM luôn giữ ở mức < 150MB
-            del channel_msg_list 
+    # 🔥 THUẬT TOÁN CHÍ MẠNG: Trộn phẳng toàn bộ rổ lớn để đảm bảo 
+    # các tin nhắn của cùng một kênh không bao giờ nằm cạnh nhau!
+    if global_temp_list:
+        print(f"🔄 Tổng gom được {len(global_temp_list)} tin nhắn. Tiến hành trộn phẳng toàn bộ hệ thống...")
+        random.shuffle(global_temp_list)
+        random.shuffle(global_temp_list) # Trộn hẳn 2 lần cho chắc chắn
+
+        # Đẩy đống dữ liệu đã xáo cực đều này vào hàng đợi cho Worker chạy ngầm
+        for msg in global_temp_list:
+            await reaction_queue.put(msg)
+        
+        print(f"📦 Đã phân bổ {len(global_temp_list)} tin nhắn vào hàng đợi. Giải phóng rổ tạm...")
+        del global_temp_list # Xóa sạch rổ lớn để trả lại RAM trống cho Render
 
     is_cleaning = False
-    print(f"🏁 [HOÀN THÀNH GOM CHUỒN CHẾU] Hệ thống RAM an toàn. Worker đang cày...")
+    print(f"🏁 [SẴN SÀNG] Worker bắt đầu thả xen kẽ các kênh, không lo dính Rate Limit!")
 
 @bot.command()
 async def total(ctx, num: int):
