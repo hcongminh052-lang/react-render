@@ -132,13 +132,20 @@ async def follow_old(ctx):
     if not auto_react_enabled: return
 
     is_cleaning = True
-    print(f"🔍 [DEEP SCAN] Bắt đầu quét xuyên lịch sử {len(TARGET_CHANNELS)} kênh...")
+    print(f"🧹 [SIÊU TỐI ƯU RAM] Bắt đầu quét cuốn chiếu {len(TARGET_CHANNELS)} kênh...")
 
-    temp_msg_list = []
-    TARGET_PER_CHANNEL = 50   # Số tin nhắn chưa thả đủ cần thu thập trên mỗi kênh
-    MAX_LOOKBACK = 1000       # Giới hạn lội tối đa 1000 tin để tránh cào quá nhiều bị Discord quét
+    TARGET_PER_CHANNEL = 30   # Giảm xuống 30 tin chất lượng/kênh để giải phóng RAM nhanh hơn
+    MAX_LOOKBACK = 500        # Giới hạn lội ngược dòng 500 tin/kênh để an toàn
 
-    for cid in TARGET_CHANNELS:
+    # Tạo một danh sách tạm để xáo trộn các kênh (giúp react rải đều các kênh thay vì tập trung 1 kênh)
+    shuffled_channels = TARGET_CHANNELS.copy()
+    random.shuffle(shuffled_channels)
+
+    for cid in shuffled_channels:
+        # Nếu tổng số react chạy ngầm đã chạm đỉnh trong lúc quét thì dừng luôn
+        if current_total_reacts >= TOTAL_REACT_LIMIT:
+            break
+
         channel = bot.get_channel(cid)
         if not channel: continue
 
@@ -146,10 +153,11 @@ async def follow_old(ctx):
         total_scanned = 0
         oldest_msg_id = None
         
-        print(f"📖 Đang quét kênh: {cid}...")
+        # Danh sách gom tạm thời cho RIÊNG KÊNH NÀY để trộn nội bộ trước khi đẩy vào Queue chính
+        channel_msg_list = []
 
         while channel_gathered < TARGET_PER_CHANNEL and total_scanned < MAX_LOOKBACK:
-            args = {"limit": 100}
+            args = {"limit": 50}  # Chia nhỏ lượt cào xuống 50 tin/lần thay vì 100 để Render không bị nghẹn
             if oldest_msg_id:
                 args["before"] = discord.Object(id=oldest_msg_id)
 
@@ -158,38 +166,41 @@ async def follow_old(ctx):
                 async for msg in channel.history(**args):
                     history_chunk.append(msg)
             except Exception as e:
-                print(f"❌ Lỗi lịch sử kênh {cid}: {e}")
+                print(f"❌ Lỗi đọc lịch sử kênh {cid}: {e}")
                 break
 
             if not history_chunk:
-                break  # Đã chạm đáy kênh chat
+                break  # Đã chạm đáy kênh
 
             oldest_msg_id = history_chunk[-1].id
             total_scanned += len(history_chunk)
 
             for msg in history_chunk:
                 if msg.reactions:
-                    # Kiểm tra xem tài khoản của bạn đã react chưa
                     my_reactions = [str(r.emoji) for r in msg.reactions if r.me]
                     missing_reactions = [r for r in msg.reactions if str(r.emoji) not in my_reactions]
                     
-                    # Nếu phát hiện tin nhắn có emoji và bạn chưa thả đủ -> Hốt luôn
                     if missing_reactions:
-                        temp_msg_list.append(msg)
+                        channel_msg_list.append(msg)
                         channel_gathered += 1
                         if channel_gathered >= TARGET_PER_CHANNEL:
                             break
-                            
-        print(f"   -> Đã duyệt qua {total_scanned} tin, lấy được {channel_gathered} tin chưa thả đủ.")
+            
+            # Xóa chunk cũ ngay lập tức để Python giải phóng RAM
+            del history_chunk
 
-    print(f"🔄 Thu hoạch tổng cộng {len(temp_msg_list)} tin nhắn. Đang trộn ngẫu nhiên...")
-    random.shuffle(temp_msg_list)
-
-    for msg in temp_msg_list:
-        await reaction_queue.put(msg)
+        # Trộn ngẫu nhiên các tin nhắn tìm được trong kênh này và đẩy thẳng vào hàng đợi
+        if channel_msg_list:
+            random.shuffle(channel_msg_list)
+            for msg in channel_msg_list:
+                await reaction_queue.put(msg)
+            
+            print(f"   -> Kênh {cid}: Đã nạp {len(channel_msg_list)} tin vào hàng đợi. Giải phóng bộ nhớ...")
+            # Xóa mảng tạm của kênh để RAM luôn giữ ở mức < 150MB
+            del channel_msg_list 
 
     is_cleaning = False
-    print(f"🏁 Đã phân bổ vào hàng đợi xử lý ngầm!")
+    print(f"🏁 [HOÀN THÀNH GOM CHUỒN CHẾU] Hệ thống RAM an toàn. Worker đang cày...")
 
 @bot.command()
 async def total(ctx, num: int):
